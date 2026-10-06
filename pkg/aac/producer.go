@@ -54,7 +54,16 @@ func (c *Producer) Start() error {
 			return err
 		}
 
-		auSize := ReadADTSSize(adts) - ADTSHeaderSize
+		frameSize := ReadADTSSize(adts)
+		minSize := uint16(ADTSHeaderSize)
+		if HasCRC(adts) {
+			minSize += 2
+		}
+		// a corrupt header must not underflow the uint16 size (would read 64 KB of garbage and panic RTPPay)
+		if !IsADTS(adts) || frameSize <= minSize {
+			return errors.New("adts: wrong frame header")
+		}
+		auSize := frameSize - ADTSHeaderSize
 
 		if HasCRC(adts) {
 			// skip CRC after header

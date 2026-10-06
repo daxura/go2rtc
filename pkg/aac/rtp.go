@@ -73,6 +73,11 @@ func RTPPay(handler core.HandlerFunc) core.HandlerFunc {
 			return
 		}
 
+		// 2+2+auSize must fit uint16 arithmetic below; drop anything that cannot be one AAC unit
+		if len(packet.Payload) == 0 || len(packet.Payload) > 0xFFFF-4 {
+			return
+		}
+
 		// support ONLY one unit in payload
 		auSize := uint16(len(packet.Payload))
 		// 2 bytes header size + 2 bytes first payload size
