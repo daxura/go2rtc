@@ -162,20 +162,23 @@ func (enc Encoder) orDefault() Encoder {
 	return enc
 }
 
-func GetProfilesResponse(names []string, enc Encoder) []byte {
+// EncoderFunc returns the encoder to advertise for a stream name.
+type EncoderFunc func(name string) Encoder
+
+func GetProfilesResponse(names []string, enc EncoderFunc) []byte {
 	e := NewEnvelope()
 	e.Append(`<trt:GetProfilesResponse>`)
 	for _, name := range names {
-		appendProfile(e, "Profiles", name, enc)
+		appendProfile(e, "Profiles", name, enc(name))
 	}
 	e.Append(`</trt:GetProfilesResponse>`)
 	return e.Bytes()
 }
 
-func GetProfileResponse(name string, enc Encoder) []byte {
+func GetProfileResponse(name string, enc EncoderFunc) []byte {
 	e := NewEnvelope()
 	e.Append(`<trt:GetProfileResponse>`)
-	appendProfile(e, "Profile", name, enc)
+	appendProfile(e, "Profile", name, enc(name))
 	e.Append(`</trt:GetProfileResponse>`)
 	return e.Bytes()
 }
@@ -189,12 +192,12 @@ func appendProfile(e *Envelope, tag, name string, enc Encoder) {
 	e.Appendf(`</trt:%s>`, tag)
 }
 
-func GetVideoSourcesResponse(names []string, enc Encoder) []byte {
-	enc = enc.orDefault()
+func GetVideoSourcesResponse(names []string, encf EncoderFunc) []byte {
 	// go2rtc name = ONVIF VideoSource token
 	e := NewEnvelope()
 	e.Append(`<trt:GetVideoSourcesResponse>`)
 	for _, name := range names {
+		enc := encf(name).orDefault()
 		e.Appendf(`<trt:VideoSources token="%s">
 	<tt:Framerate>30.000000</tt:Framerate>
 	<tt:Resolution><tt:Width>%d</tt:Width><tt:Height>%d</tt:Height></tt:Resolution>

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -24,17 +25,38 @@ func Init() {
 
 	// What the ONVIF server advertises for its streams (go2rtc does not
 	// transcode; clients like UniFi Protect size their pipeline from it).
+	type encoderCfg struct {
+		Encoding string `yaml:"encoding"`
+		Width    int    `yaml:"width"`
+		Height   int    `yaml:"height"`
+		FPS      int    `yaml:"fps"`
+		Bitrate  int    `yaml:"bitrate"`
+	}
 	var cfg struct {
 		Mod struct {
-			Encoding string `yaml:"encoding"`
-			Width    int    `yaml:"width"`
-			Height   int    `yaml:"height"`
-			FPS      int    `yaml:"fps"`
-			Bitrate  int    `yaml:"bitrate"`
+			encoderCfg `yaml:",inline"`
+			Profiles   map[string]encoderCfg `yaml:"profiles"` // per-stream overrides (e.g. a low-quality second profile)
 		} `yaml:"onvif"`
 	}
 	app.LoadConfig(&cfg)
-	encoder = onvif.Encoder{Encoding: strings.ToUpper(cfg.Mod.Encoding), Width: cfg.Mod.Width, Height: cfg.Mod.Height, FPS: cfg.Mod.FPS, Bitrate: cfg.Mod.Bitrate}
+	toEnc := func(c encoderCfg) onvif.Encoder {
+		return onvif.Encoder{Encoding: strings.ToUpper(c.Encoding), Width: c.Width, Height: c.Height, FPS: c.FPS, Bitrate: c.Bitrate}
+	}
+	base := toEnc(cfg.Mod.encoderCfg)
+	overrides := map[string]onvif.Encoder{}
+	for name, c := range cfg.Mod.Profiles {
+		enc := toEnc(c)
+		if enc.Encoding == "" {
+			enc.Encoding = base.Encoding
+		}
+		overrides[name] = enc
+	}
+	encoder = func(name string) onvif.Encoder {
+		if enc, ok := overrides[name]; ok {
+			return enc
+		}
+		return base
+	}
 
 	streams.HandleFunc("onvif", streamOnvif)
 
@@ -46,7 +68,14 @@ func Init() {
 }
 
 var log zerolog.Logger
-var encoder onvif.Encoder
+
+func sortedNames() []string {
+	names := streams.GetAllNames()
+	sort.Strings(names)
+	return names
+}
+
+var encoder onvif.EncoderFunc
 
 func streamOnvif(rawURL string) (core.Producer, error) {
 	client, err := onvif.NewClient(rawURL)
@@ -124,28 +153,29 @@ func onvifDeviceService(w http.ResponseWriter, r *http.Request) {
 		})
 
 	case onvif.MediaGetVideoSources:
-		b = onvif.GetVideoSourcesResponse(streams.GetAllNames(), encoder)
+		b = onvif.GetVideoSourcesResponse(sortedNames(), encoder)
 
 	case onvif.MediaGetProfiles:
 		// important for Hass: codec, width, height
-		b = onvif.GetProfilesResponse(streams.GetAllNames(), encoder)
+		// sorted: clients such as UniFi Protect take the first profile as HQ, the second as LQ
+		b = onvif.GetProfilesResponse(sortedNames(), encoder)
 
 	case onvif.MediaGetProfile:
 		token := onvif.FindTagValue(b, "ProfileToken")
 		b = onvif.GetProfileResponse(token, encoder)
 
 	case onvif.MediaGetVideoEncoderConfiguration:
-		b = onvif.GetVideoEncoderConfigurationResponse(encoder)
+		b = onvif.GetVideoEncoderConfigurationResponse(encoder(""))
 
 	case onvif.MediaGetVideoEncoderConfigurations:
-		b = onvif.GetVideoEncoderConfigurationsResponse(encoder)
+		b = onvif.GetVideoEncoderConfigurationsResponse(encoder(""))
 
 	case onvif.MediaGetVideoEncoderConfigurationOptions:
-		b = onvif.GetVideoEncoderConfigurationOptionsResponse(encoder)
+		b = onvif.GetVideoEncoderConfigurationOptionsResponse(encoder(""))
 
 	case onvif.MediaGetVideoSourceConfigurations:
 		// important for Happytime Onvif Client
-		b = onvif.GetVideoSourceConfigurationsResponse(streams.GetAllNames())
+		b = onvif.GetVideoSourceConfigurationsResponse(sortedNames())
 
 	case onvif.MediaGetVideoSourceConfiguration:
 		token := onvif.FindTagValue(b, "ConfigurationToken")
