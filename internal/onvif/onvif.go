@@ -34,11 +34,17 @@ func Init() {
 	}
 	var cfg struct {
 		Mod struct {
-			encoderCfg `yaml:",inline"`
-			Profiles   map[string]encoderCfg `yaml:"profiles"` // per-stream overrides (e.g. a low-quality second profile)
+			encoderCfg   `yaml:",inline"`
+			Profiles     map[string]encoderCfg `yaml:"profiles"` // per-stream overrides (e.g. a low-quality second profile)
+			Manufacturer string                `yaml:"manufacturer"`
+			Model        string                `yaml:"model"`
 		} `yaml:"onvif"`
 	}
 	app.LoadConfig(&cfg)
+	manufacturer, model = cfg.Mod.Manufacturer, cfg.Mod.Model
+	if model == "" {
+		model = "go2rtc"
+	}
 	toEnc := func(c encoderCfg) onvif.Encoder {
 		return onvif.Encoder{Encoding: strings.ToUpper(c.Encoding), Width: c.Width, Height: c.Height, FPS: c.FPS, Bitrate: c.Bitrate}
 	}
@@ -76,6 +82,7 @@ func sortedNames() []string {
 }
 
 var encoder onvif.EncoderFunc
+var manufacturer, model string
 
 func streamOnvif(rawURL string) (core.Producer, error) {
 	client, err := onvif.NewClient(rawURL)
@@ -143,7 +150,7 @@ func onvifDeviceService(w http.ResponseWriter, r *http.Request) {
 
 	case onvif.DeviceGetDeviceInformation:
 		// important for Hass: SerialNumber (unique server ID)
-		b = onvif.GetDeviceInformationResponse("", "go2rtc", app.Version, r.Host)
+		b = onvif.GetDeviceInformationResponse(manufacturer, model, app.Version, r.Host)
 
 	case onvif.DeviceSystemReboot:
 		b = onvif.StaticResponse(operation)
