@@ -70,7 +70,9 @@ func Init() {
 			c := rtsp.NewServer(conn)
 			c.PacketSize = conf.Mod.PacketSize
 			// skip check auth for localhost
-			if conf.Mod.Username != "" && !conn.RemoteAddr().(*net.TCPAddr).IP.IsLoopback() {
+			// no auth for local peers: loopback, or our own listen address
+			// (the exec/ffmpeg sources of an instance bound to one interface)
+			if ip := conn.RemoteAddr().(*net.TCPAddr).IP; conf.Mod.Username != "" && !ip.IsLoopback() && ip.String() != Host {
 				c.Auth(conf.Mod.Username, conf.Mod.Password)
 			}
 			go tcpHandler(c)
