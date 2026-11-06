@@ -22,6 +22,20 @@ import (
 func Init() {
 	log = app.GetLogger("onvif")
 
+	// What the ONVIF server advertises for its streams (go2rtc does not
+	// transcode; clients like UniFi Protect size their pipeline from it).
+	var cfg struct {
+		Mod struct {
+			Encoding string `yaml:"encoding"`
+			Width    int    `yaml:"width"`
+			Height   int    `yaml:"height"`
+			FPS      int    `yaml:"fps"`
+			Bitrate  int    `yaml:"bitrate"`
+		} `yaml:"onvif"`
+	}
+	app.LoadConfig(&cfg)
+	encoder = onvif.Encoder{Encoding: strings.ToUpper(cfg.Mod.Encoding), Width: cfg.Mod.Width, Height: cfg.Mod.Height, FPS: cfg.Mod.FPS, Bitrate: cfg.Mod.Bitrate}
+
 	streams.HandleFunc("onvif", streamOnvif)
 
 	// ONVIF server on all suburls
@@ -32,6 +46,7 @@ func Init() {
 }
 
 var log zerolog.Logger
+var encoder onvif.Encoder
 
 func streamOnvif(rawURL string) (core.Producer, error) {
 	client, err := onvif.NewClient(rawURL)
@@ -85,10 +100,7 @@ func onvifDeviceService(w http.ResponseWriter, r *http.Request) {
 		onvif.DeviceGetNetworkProtocols,
 		onvif.DeviceGetNTP,
 		onvif.DeviceGetScopes,
-		onvif.MediaGetVideoEncoderConfiguration,
-		onvif.MediaGetVideoEncoderConfigurations,
 		onvif.MediaGetAudioEncoderConfigurations,
-		onvif.MediaGetVideoEncoderConfigurationOptions,
 		onvif.MediaGetAudioSources,
 		onvif.MediaGetAudioSourceConfigurations:
 		b = onvif.StaticResponse(operation)
@@ -112,15 +124,24 @@ func onvifDeviceService(w http.ResponseWriter, r *http.Request) {
 		})
 
 	case onvif.MediaGetVideoSources:
-		b = onvif.GetVideoSourcesResponse(streams.GetAllNames())
+		b = onvif.GetVideoSourcesResponse(streams.GetAllNames(), encoder)
 
 	case onvif.MediaGetProfiles:
-		// important for Hass: H264 codec, width, height
-		b = onvif.GetProfilesResponse(streams.GetAllNames())
+		// important for Hass: codec, width, height
+		b = onvif.GetProfilesResponse(streams.GetAllNames(), encoder)
 
 	case onvif.MediaGetProfile:
 		token := onvif.FindTagValue(b, "ProfileToken")
-		b = onvif.GetProfileResponse(token)
+		b = onvif.GetProfileResponse(token, encoder)
+
+	case onvif.MediaGetVideoEncoderConfiguration:
+		b = onvif.GetVideoEncoderConfigurationResponse(encoder)
+
+	case onvif.MediaGetVideoEncoderConfigurations:
+		b = onvif.GetVideoEncoderConfigurationsResponse(encoder)
+
+	case onvif.MediaGetVideoEncoderConfigurationOptions:
+		b = onvif.GetVideoEncoderConfigurationOptionsResponse(encoder)
 
 	case onvif.MediaGetVideoSourceConfigurations:
 		// important for Happytime Onvif Client

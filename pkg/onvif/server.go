@@ -133,42 +133,72 @@ func GetDeviceInformationResponse(manuf, model, firmware, serial string) []byte 
 	return e.Bytes()
 }
 
-func GetProfilesResponse(names []string) []byte {
+// Encoder describes the (single) video encoder the ONVIF server advertises.
+// go2rtc does not transcode, so this is metadata about the stream it serves;
+// clients such as UniFi Protect size their decode pipeline from it.
+type Encoder struct {
+	Encoding string // H264 or H265
+	Width    int
+	Height   int
+	FPS      int
+	Bitrate  int // kbps
+}
+
+var DefaultEncoder = Encoder{Encoding: "H264", Width: 1920, Height: 1080, FPS: 30, Bitrate: 8192}
+
+func (enc Encoder) orDefault() Encoder {
+	if enc.Encoding == "" {
+		enc.Encoding = DefaultEncoder.Encoding
+	}
+	if enc.Width == 0 || enc.Height == 0 {
+		enc.Width, enc.Height = DefaultEncoder.Width, DefaultEncoder.Height
+	}
+	if enc.FPS == 0 {
+		enc.FPS = DefaultEncoder.FPS
+	}
+	if enc.Bitrate == 0 {
+		enc.Bitrate = DefaultEncoder.Bitrate
+	}
+	return enc
+}
+
+func GetProfilesResponse(names []string, enc Encoder) []byte {
 	e := NewEnvelope()
 	e.Append(`<trt:GetProfilesResponse>`)
 	for _, name := range names {
-		appendProfile(e, "Profiles", name)
+		appendProfile(e, "Profiles", name, enc)
 	}
 	e.Append(`</trt:GetProfilesResponse>`)
 	return e.Bytes()
 }
 
-func GetProfileResponse(name string) []byte {
+func GetProfileResponse(name string, enc Encoder) []byte {
 	e := NewEnvelope()
 	e.Append(`<trt:GetProfileResponse>`)
-	appendProfile(e, "Profile", name)
+	appendProfile(e, "Profile", name, enc)
 	e.Append(`</trt:GetProfileResponse>`)
 	return e.Bytes()
 }
 
-func appendProfile(e *Envelope, tag, name string) {
+func appendProfile(e *Envelope, tag, name string, enc Encoder) {
 	// go2rtc name = ONVIF Profile Name = ONVIF Profile token
 	e.Appendf(`<trt:%s token="%s" fixed="true">`, tag, name)
 	e.Appendf(`<tt:Name>%s</tt:Name>`, name)
 	appendVideoSourceConfiguration(e, "VideoSourceConfiguration", name)
-	appendVideoEncoderConfiguration(e, "VideoEncoderConfiguration")
+	appendVideoEncoderConfiguration(e, "VideoEncoderConfiguration", enc)
 	e.Appendf(`</trt:%s>`, tag)
 }
 
-func GetVideoSourcesResponse(names []string) []byte {
+func GetVideoSourcesResponse(names []string, enc Encoder) []byte {
+	enc = enc.orDefault()
 	// go2rtc name = ONVIF VideoSource token
 	e := NewEnvelope()
 	e.Append(`<trt:GetVideoSourcesResponse>`)
 	for _, name := range names {
 		e.Appendf(`<trt:VideoSources token="%s">
 	<tt:Framerate>30.000000</tt:Framerate>
-	<tt:Resolution><tt:Width>1920</tt:Width><tt:Height>1080</tt:Height></tt:Resolution>
-</trt:VideoSources>`, name)
+	<tt:Resolution><tt:Width>%d</tt:Width><tt:Height>%d</tt:Height></tt:Resolution>
+</trt:VideoSources>`, name, enc.Width, enc.Height)
 	}
 	e.Append(`</trt:GetVideoSourcesResponse>`)
 	return e.Bytes()
@@ -201,34 +231,58 @@ func appendVideoSourceConfiguration(e *Envelope, tag, name string) {
 </tt:%s>`, tag, name, name, tag)
 }
 
-func GetVideoEncoderConfigurationsResponse() []byte {
+func GetVideoEncoderConfigurationsResponse(enc Encoder) []byte {
 	e := NewEnvelope()
 	e.Append(`<trt:GetVideoEncoderConfigurationsResponse>`)
-	appendVideoEncoderConfiguration(e, "VideoEncoderConfigurations")
+	appendVideoEncoderConfiguration(e, "VideoEncoderConfigurations", enc)
 	e.Append(`</trt:GetVideoEncoderConfigurationsResponse>`)
 	return e.Bytes()
 }
 
-func GetVideoEncoderConfigurationResponse() []byte {
+func GetVideoEncoderConfigurationResponse(enc Encoder) []byte {
 	e := NewEnvelope()
 	e.Append(`<trt:GetVideoEncoderConfigurationResponse>`)
-	appendVideoEncoderConfiguration(e, "VideoEncoderConfiguration")
+	appendVideoEncoderConfiguration(e, "VideoEncoderConfiguration", enc)
 	e.Append(`</trt:GetVideoEncoderConfigurationResponse>`)
 	return e.Bytes()
 }
 
-func appendVideoEncoderConfiguration(e *Envelope, tag string) {
+func appendVideoEncoderConfiguration(e *Envelope, tag string, enc Encoder) {
+	enc = enc.orDefault()
 	// empty `RateControl` important for UniFi Protect
 	e.Appendf(`<tt:%s token="vec">
 		<tt:Name>VEC</tt:Name>
         <tt:UseCount>1</tt:UseCount>
-		<tt:Encoding>H264</tt:Encoding>
-		<tt:Resolution><tt:Width>1920</tt:Width><tt:Height>1080</tt:Height></tt:Resolution>
+		<tt:Encoding>%s</tt:Encoding>
+		<tt:Resolution><tt:Width>%d</tt:Width><tt:Height>%d</tt:Height></tt:Resolution>
         <tt:Quality>0</tt:Quality>
-		<tt:RateControl><tt:FrameRateLimit>30</tt:FrameRateLimit><tt:EncodingInterval>1</tt:EncodingInterval><tt:BitrateLimit>8192</tt:BitrateLimit></tt:RateControl>
-        <tt:H264><tt:GovLength>10</tt:GovLength><tt:H264Profile>Main</tt:H264Profile></tt:H264>
+		<tt:RateControl><tt:FrameRateLimit>%d</tt:FrameRateLimit><tt:EncodingInterval>1</tt:EncodingInterval><tt:BitrateLimit>%d</tt:BitrateLimit></tt:RateControl>`,
+		tag, enc.Encoding, enc.Width, enc.Height, enc.FPS, enc.Bitrate)
+	if enc.Encoding == "H264" {
+		e.Append(`
+        <tt:H264><tt:GovLength>10</tt:GovLength><tt:H264Profile>Main</tt:H264Profile></tt:H264>`)
+	}
+	e.Appendf(`
         <tt:SessionTimeout>PT10S</tt:SessionTimeout>
-	</tt:%s>`, tag, tag)
+	</tt:%s>`, tag)
+}
+
+func GetVideoEncoderConfigurationOptionsResponse(enc Encoder) []byte {
+	enc = enc.orDefault()
+	e := NewEnvelope()
+	e.Appendf(`<trt:GetVideoEncoderConfigurationOptionsResponse>
+   <trt:Options>
+       <tt:QualityRange><tt:Min>1</tt:Min><tt:Max>6</tt:Max></tt:QualityRange>
+	   <tt:%[1]s>
+		   <tt:ResolutionsAvailable><tt:Width>%[2]d</tt:Width><tt:Height>%[3]d</tt:Height></tt:ResolutionsAvailable>
+		   <tt:GovLengthRange><tt:Min>0</tt:Min><tt:Max>100</tt:Max></tt:GovLengthRange>
+		   <tt:FrameRateRange><tt:Min>1</tt:Min><tt:Max>%[4]d</tt:Max></tt:FrameRateRange>
+		   <tt:EncodingIntervalRange><tt:Min>1</tt:Min><tt:Max>100</tt:Max></tt:EncodingIntervalRange>
+           <tt:%[1]sProfilesSupported>Main</tt:%[1]sProfilesSupported>
+	   </tt:%[1]s>
+   </trt:Options>
+</trt:GetVideoEncoderConfigurationOptionsResponse>`, enc.Encoding, enc.Width, enc.Height, enc.FPS)
+	return e.Bytes()
 }
 
 func GetStreamUriResponse(uri string) []byte {
@@ -248,9 +302,9 @@ func StaticResponse(operation string) []byte {
 	case DeviceGetSystemDateAndTime:
 		return GetSystemDateAndTimeResponse()
 	case MediaGetVideoEncoderConfiguration:
-		return GetVideoEncoderConfigurationResponse()
+		return GetVideoEncoderConfigurationResponse(DefaultEncoder)
 	case MediaGetVideoEncoderConfigurations:
-		return GetVideoEncoderConfigurationsResponse()
+		return GetVideoEncoderConfigurationsResponse(DefaultEncoder)
 	}
 
 	e := NewEnvelope()
