@@ -52,7 +52,7 @@ func Init() {
 		return
 	}
 
-	_, Port, _ = net.SplitHostPort(address)
+	Host, Port, _ = net.SplitHostPort(address)
 
 	log.Info().Str("addr", address).Msg("[rtsp] listen")
 
@@ -84,7 +84,8 @@ func HandleFunc(handler Handler) {
 	handlers = append(handlers, handler)
 }
 
-var Port string
+// Host and Port of the RTSP listener. Host is empty for a wildcard listen.
+var Host, Port string
 
 // internal
 

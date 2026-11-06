@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/url"
 	"os"
 	"slices"
@@ -78,7 +79,14 @@ func execHandle(rawURL string) (prod core.Producer, err error) {
 
 		sum := md5.Sum([]byte(rawURL))
 		path = "/" + hex.EncodeToString(sum[:])
-		rawURL = rawURL[:i] + "rtsp://127.0.0.1:" + rtsp.Port + path + rawURL[i+8:]
+		// push to the RTSP listener: loopback for a wildcard listen, else the
+		// configured address (an instance bound to one interface has no
+		// loopback listener)
+		host := rtsp.Host
+		if host == "" || host == "0.0.0.0" || host == "::" {
+			host = "127.0.0.1"
+		}
+		rawURL = rawURL[:i] + "rtsp://" + net.JoinHostPort(host, rtsp.Port) + path + rawURL[i+8:]
 	}
 
 	cmd := shell.NewCommand(rawURL[5:]) // remove `exec:`
