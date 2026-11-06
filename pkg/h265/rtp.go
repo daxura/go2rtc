@@ -26,12 +26,20 @@ func RTPDepay(codec *core.Codec, handler core.HandlerFunc) core.HandlerFunc {
 		//log.Printf("[RTP] codec: %s, nalu: %2d, size: %6d, ts: %10d, pt: %2d, ssrc: %d, seq: %d, %v", track.Codec.Name, nuType, len(packet.Payload), packet.Timestamp, packet.PayloadType, packet.SSRC, packet.SequenceNumber, packet.Marker)
 
 		// Fix for RtspServer https://github.com/AlexxIT/go2rtc/issues/244
+		// A small SEI that carries the marker is dropped, but it still ends the
+		// access unit: a sender that puts the next frame's SEI prefix at the end
+		// of each AU (go2rtc's own Annex-B producer does) would otherwise never
+		// flush the buffer.
+		var skip bool
 		if packet.Marker && len(data) < h264.PSMaxSize {
 			switch nuType {
 			case NALUTypeVPS, NALUTypeSPS, NALUTypePPS:
 				packet.Marker = false
 			case NALUTypePrefixSEI, NALUTypeSuffixSEI:
-				return
+				if len(buf) == 0 {
+					return
+				}
+				skip = true
 			}
 		}
 
@@ -92,7 +100,7 @@ func RTPDepay(codec *core.Codec, handler core.HandlerFunc) core.HandlerFunc {
 				buf = append(buf, (data[0]&0x81)|(nuType<<1), data[1])
 				buf = append(buf, data[3:]...)
 			}
-		} else {
+		} else if !skip {
 			buf = binary.BigEndian.AppendUint32(buf, uint32(len(data))) // NAL unit size
 			buf = append(buf, data...)
 		}
