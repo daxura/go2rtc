@@ -142,6 +142,15 @@ type Encoder struct {
 	Height   int
 	FPS      int
 	Bitrate  int // kbps
+	Audio    Audio
+}
+
+// Audio describes the audio track served next to the video (zero value = none).
+// Clients such as UniFi Protect take "the camera has a microphone" from it.
+type Audio struct {
+	Encoding   string // G711, G726 or AAC
+	Bitrate    int    // kbps
+	SampleRate int    // kHz
 }
 
 var DefaultEncoder = Encoder{Encoding: "H264", Width: 1920, Height: 1080, FPS: 30, Bitrate: 8192}
@@ -188,8 +197,46 @@ func appendProfile(e *Envelope, tag, name string, enc Encoder) {
 	e.Appendf(`<trt:%s token="%s" fixed="true">`, tag, name)
 	e.Appendf(`<tt:Name>%s</tt:Name>`, name)
 	appendVideoSourceConfiguration(e, "VideoSourceConfiguration", name)
+	if enc.Audio.Encoding != "" {
+		appendAudioSourceConfiguration(e, "tt:AudioSourceConfiguration")
+	}
 	appendVideoEncoderConfiguration(e, "VideoEncoderConfiguration", enc)
+	if enc.Audio.Encoding != "" {
+		appendAudioEncoderConfiguration(e, "tt:AudioEncoderConfiguration", enc.Audio)
+	}
 	e.Appendf(`</trt:%s>`, tag)
+}
+
+// tag is the qualified element name: tt:… inside a profile, trt:Configurations in a list response
+func appendAudioSourceConfiguration(e *Envelope, tag string) {
+	e.Appendf(`<%s token="asc"><tt:Name>ASC</tt:Name><tt:UseCount>1</tt:UseCount><tt:SourceToken>audio</tt:SourceToken></%s>`, tag, tag)
+}
+
+func appendAudioEncoderConfiguration(e *Envelope, tag string, a Audio) {
+	e.Appendf(`<%s token="aec"><tt:Name>AEC</tt:Name><tt:UseCount>1</tt:UseCount><tt:Encoding>%s</tt:Encoding><tt:Bitrate>%d</tt:Bitrate><tt:SampleRate>%d</tt:SampleRate><tt:SessionTimeout>PT10S</tt:SessionTimeout></%s>`,
+		tag, a.Encoding, a.Bitrate, a.SampleRate, tag)
+}
+
+func GetAudioSourcesResponse() []byte {
+	e := NewEnvelope()
+	e.Append(`<trt:GetAudioSourcesResponse><trt:AudioSources token="audio"><tt:Channels>1</tt:Channels></trt:AudioSources></trt:GetAudioSourcesResponse>`)
+	return e.Bytes()
+}
+
+func GetAudioSourceConfigurationsResponse() []byte {
+	e := NewEnvelope()
+	e.Append(`<trt:GetAudioSourceConfigurationsResponse>`)
+	appendAudioSourceConfiguration(e, "trt:Configurations")
+	e.Append(`</trt:GetAudioSourceConfigurationsResponse>`)
+	return e.Bytes()
+}
+
+func GetAudioEncoderConfigurationsResponse(a Audio) []byte {
+	e := NewEnvelope()
+	e.Append(`<trt:GetAudioEncoderConfigurationsResponse>`)
+	appendAudioEncoderConfiguration(e, "trt:Configurations", a)
+	e.Append(`</trt:GetAudioEncoderConfigurationsResponse>`)
+	return e.Bytes()
 }
 
 func GetVideoSourcesResponse(names []string, encf EncoderFunc) []byte {

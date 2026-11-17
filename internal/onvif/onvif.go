@@ -31,6 +31,12 @@ func Init() {
 		Height   int    `yaml:"height"`
 		FPS      int    `yaml:"fps"`
 		Bitrate  int    `yaml:"bitrate"`
+		// audio track served with this stream; advertised only where set (no inheritance into `profiles`)
+		Audio struct {
+			Encoding   string `yaml:"encoding"`
+			Bitrate    int    `yaml:"bitrate"`
+			SampleRate int    `yaml:"sample_rate"`
+		} `yaml:"audio"`
 	}
 	var cfg struct {
 		Mod struct {
@@ -46,7 +52,10 @@ func Init() {
 		model = "go2rtc"
 	}
 	toEnc := func(c encoderCfg) onvif.Encoder {
-		return onvif.Encoder{Encoding: strings.ToUpper(c.Encoding), Width: c.Width, Height: c.Height, FPS: c.FPS, Bitrate: c.Bitrate}
+		return onvif.Encoder{
+			Encoding: strings.ToUpper(c.Encoding), Width: c.Width, Height: c.Height, FPS: c.FPS, Bitrate: c.Bitrate,
+			Audio: onvif.Audio{Encoding: strings.ToUpper(c.Audio.Encoding), Bitrate: c.Audio.Bitrate, SampleRate: c.Audio.SampleRate},
+		}
 	}
 	base := toEnc(cfg.Mod.encoderCfg)
 	overrides := map[string]onvif.Encoder{}
@@ -135,11 +144,23 @@ func onvifDeviceService(w http.ResponseWriter, r *http.Request) {
 		onvif.DeviceGetNetworkDefaultGateway,
 		onvif.DeviceGetNetworkProtocols,
 		onvif.DeviceGetNTP,
-		onvif.DeviceGetScopes,
-		onvif.MediaGetAudioEncoderConfigurations,
+		onvif.DeviceGetScopes:
+		b = onvif.StaticResponse(operation)
+
+	case onvif.MediaGetAudioEncoderConfigurations,
 		onvif.MediaGetAudioSources,
 		onvif.MediaGetAudioSourceConfigurations:
-		b = onvif.StaticResponse(operation)
+		audio := encoder("").Audio
+		switch {
+		case audio.Encoding == "":
+			b = onvif.StaticResponse(operation) // empty lists
+		case operation == onvif.MediaGetAudioSources:
+			b = onvif.GetAudioSourcesResponse()
+		case operation == onvif.MediaGetAudioSourceConfigurations:
+			b = onvif.GetAudioSourceConfigurationsResponse()
+		default:
+			b = onvif.GetAudioEncoderConfigurationsResponse(audio)
+		}
 
 	case onvif.DeviceGetCapabilities:
 		// important for Hass: Media section
